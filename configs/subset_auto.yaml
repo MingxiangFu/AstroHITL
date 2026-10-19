@@ -1,0 +1,25 @@
+# Automatic test on the portable 10k subset.
+# 中文说明：用 datasets/fama_base/features.h5 和 subset/expert_testset.csv，按 main_label_expert 跑四路对比。
+feature_path: datasets/fama_base/features.h5
+labels_csv: subset/expert_testset.csv
+img_dir: subset/images
+index_column: index
+label_column: main_label_expert
+positive: smooth
+negatives:
+  - unbarred_spirals
+  - barred_spirals
+  - irregular
+  - edge_on_no_bulge
+  - edge_on_with_bulge
+  - poor_quality
+pool_size: 2000
+round_size: 12
+rounds: 4
+out_dim: 32
+seed: 0
+epochs: 8
+eval_fraction: 0.3
+classifier_epochs: 10
+hidden_dim: 128
+device: cpu

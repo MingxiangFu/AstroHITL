@@ -1,0 +1,26 @@
+# Scripted mergers cell on the development expert split.
+# 中文说明：用开发集的 mergers 标签跑四路对比，不读锁定标签。
+feature_path: "<path-to-features>"
+labels_csv: "<path-to-labels>"
+img_dir: "<path-to-images>"
+index_column: index
+label_column: combined_score_secondary_label
+positive: mergers
+negatives:
+  - unbarred_spirals
+  - barred_spirals
+  - smooth
+  - irregular
+  - edge_on_no_bulge
+  - edge_on_with_bulge
+  - poor_quality
+  - pair_group
+pool_size: 5000
+round_size: 12
+rounds: 8
+out_dim: 32
+seed: 0
+epochs: 30
+eval_fraction: 0.3
+classifier_epochs: 40
+hidden_dim: 256

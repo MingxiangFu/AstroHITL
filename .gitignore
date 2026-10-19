@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.superpowers/
+web_sessions/
+runs/
+subset/images/
+*.pt
+*.npy
+.venv/
+.env
+.env.*
+*.pem
+id_rsa
+id_ed25519
+.ipynb_checkpoints/
+datasets/jwst_10k/

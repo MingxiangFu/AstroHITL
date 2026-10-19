@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>星系标注</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body data-layout="board" data-frozen="false" data-magnifier="off" data-shot="small">
+  <header class="topbar">
+    <div class="brand">
+      <p class="session" id="status"></p>
+      <h1 id="i18n-title">星系标注</h1>
+    </div>
+    <button id="lang-toggle" type="button">English</button>
+  </header>
+  <section id="setup" class="setup">
+    <label><span id="i18n-feature">特征文件</span> <input id="feature-path" size="72" value="datasets/fama_base/features.h5"></label>
+    <label><span id="i18n-img">图片目录</span> <input id="img-dir" size="48" value="subset/images"></label>
+    <label><span id="i18n-pool">搜索池大小</span> <input id="pool-size" type="number" value="5000"></label>
+    <label><span id="i18n-seed">随机种子</span> <input id="seed" type="number" value="0"></label>
+    <label><span id="i18n-dim">输出维度</span> <input id="out-dim" type="number" value="32"></label>
+    <label><span id="i18n-round">每轮张数</span> <input id="round-size" type="number" value="12"></label>
+    <label><span id="i18n-epochs">训练轮数</span> <input id="epochs" type="number" value="30"></label>
+    <button id="open-session" type="button">打开会话</button>
+  </section>
+  <div class="toolbar">
+    <div class="seg" id="freeze-group" role="radiogroup" aria-label="卡片是否冻结">
+      <button id="freeze-off" type="button" role="radio" data-freeze="off" aria-checked="true">解冻</button>
+      <button id="freeze-on" type="button" role="radio" data-freeze="on" aria-checked="false">冻结</button>
+    </div>
+    <p class="hint" id="freeze-hint"></p>
+    <div class="seg" id="edge-group" role="radiogroup" aria-label="连线粗细的含义">
+      <button id="edge-strength" type="button" role="radio" data-edge="strength" aria-checked="false">分离强度</button>
+      <button id="edge-distance" type="button" role="radio" data-edge="distance" aria-checked="true">平均距离</button>
+    </div>
+    <p class="hint" id="edge-hint"></p>
+    <button id="magnifier-toggle" type="button" aria-pressed="false">放大镜关 · Z</button>
+    <label class="file-label"><span id="i18n-import-label">导入 CSV</span> <input id="label-file" type="file" accept=".csv,text/csv"></label>
+    <button id="import-labels" type="button">导入并训练</button>
+    <button id="export-labels" type="button">导出</button>
+  </div>
+  <main id="workbench" class="workspace" hidden>
+    <section class="zone rec" id="zone-rec">
+      <div class="zone-head">
+        <div class="head-main">
+          <h2 id="i18n-rec-title">本轮推荐</h2>
+          <div class="seg" id="shot-group" role="radiogroup" aria-label="推荐图大小">
+            <button id="shot-small" type="button" role="radio" data-shot="small" aria-checked="true">小图</button>
+            <button id="shot-large" type="button" role="radio" data-shot="large" aria-checked="false">大图</button>
+          </div>
+        </div>
+        <p class="zone-note" id="page-note"></p>
+      </div>
+      <div class="mode-row">
+        <div class="seg" id="left-modes" role="radiogroup" aria-label="左侧列表">
+          <button id="mode-recommend" type="button" role="radio" aria-checked="true">推荐</button>
+          <button id="mode-labeled" type="button" role="radio" aria-checked="false">当前类别</button>
+          <button id="mode-recycle" type="button" role="radio" aria-checked="false">回收站</button>
+        </div>
+        <span id="recycle-note"></span>
+      </div>
+      <div class="rec-tools" id="recommend-row">
+        <label><span id="i18n-mode">方式</span>
+          <select id="mechanism"></select>
+        </label>
+        <button id="recommend" type="button">推荐</button>
+        <button id="page-prev" type="button">上一页</button>
+        <button id="page-next" type="button">下一页</button>
+      </div>
+      <div class="shots" id="images"></div>
+      <section class="well" id="well-recommend" data-well="recommend">
+        <div class="well-head">
+          <h2 id="i18n-rec-well">推荐类别</h2>
+          <div class="well-actions">
+            <button type="button" data-act="all" data-well="recommend" id="i18n-select-all">选中全部</button>
+            <button type="button" data-act="clear" data-well="recommend" id="i18n-clear-rec">移除全部</button>
+          </div>
+        </div>
+        <div class="tag-list" id="list-recommend"></div>
+        <p class="well-empty" id="empty-recommend" hidden>槽里还没有类别。冻结后，从卡片任意处拖到这里。空槽表示使用当前层的全部类别。</p>
+        <p class="well-msg" id="msg-recommend"></p>
+      </section>
+      <div class="busy-layer" id="busy-rec" hidden>
+        <div class="busy-bar"><div class="busy-fill"></div></div>
+      </div>
+    </section>
+    <section class="zone graph" id="zone-graph">
+      <div class="zone-head">
+        <div class="head-main">
+          <h2 id="i18n-graph-title">类别图</h2>
+          <div class="seg" id="center-modes" role="radiogroup" aria-label="中心视图">
+            <button id="mode-graph" type="button" role="radio" aria-checked="true">类别图</button>
+            <button id="mode-umap" type="button" role="radio" aria-checked="false">UMAP</button>
+          </div>
+        </div>
+        <p class="zone-note" id="graph-note"></p>
+      </div>
+      <div id="crumbs"></div>
+      <div id="graph" class="stage"></div>
+      <div id="umap-board" hidden>
+        <p id="umap-status" class="umap-status" hidden></p>
+        <div class="umap-plots">
+          <div class="umap-pane">
+            <span id="umap-raw-label">原始</span>
+            <svg id="umap-raw"></svg>
+          </div>
+          <div class="umap-pane">
+            <span id="umap-mapped-label">映射</span>
+            <svg id="umap-mapped"></svg>
+          </div>
+        </div>
+      </div>
+      <div class="busy-layer" id="busy-graph" hidden>
+        <div class="busy-bar"><div class="busy-fill"></div></div>
+      </div>
+    </section>
+    <section class="zone task" id="zone-task">
+      <div class="zone-head">
+        <div class="seg" id="right-modes" role="radiogroup" aria-label="右侧工作">
+          <button id="mode-mapper" type="button" role="radio" aria-checked="true">特征训练</button>
+          <button id="mode-task" type="button" role="radio" aria-checked="false">分类/排序</button>
+        </div>
+      </div>
+      <div id="panel-mapper">
+        <label class="size-pick"><span id="i18n-mapper-size">映射宽度</span>
+          <select id="mapper-size"></select>
+        </label>
+        <div class="edge-tools">
+          <button id="edge-table-toggle" type="button" aria-pressed="true">隐藏边表</button>
+        </div>
+        <div id="edges"></div>
+        <div class="graph-actions">
+          <button id="confirm" type="button">确认并训练映射</button>
+          <button id="reset-mapper" type="button">重置映射</button>
+        </div>
+        <table id="distances"></table>
+      </div>
+      <div id="panel-task" hidden>
+      <div class="panel-bar">
+        <button id="add-class" type="button">新建空类</button>
+        <button id="clear-tasks" type="button">移除全部</button>
+      </div>
+      <div id="task-classes"></div>
+      <p class="well-empty" id="empty-task">先新建空类，再把图上的类别拖进该类。</p>
+      <div class="task-tools">
+        <div id="saved-tasks"></div>
+        <div class="fracs">
+          <label><span id="i18n-frac-train">训练</span> <input id="frac-train" type="number" min="0.01" max="1" step="0.01" value="0.60"></label>
+          <label><span id="i18n-frac-val">验证</span> <input id="frac-val" type="number" min="0" max="1" step="0.01" value="0.20"></label>
+          <label><span id="i18n-frac-test">测试</span> <input id="frac-test" type="number" min="0" max="1" step="0.01" value="0.20"></label>
+        </div>
+        <div class="head-size-row">
+          <div class="seg" id="feature-source" role="radiogroup" aria-label="特征">
+            <button id="source-mapped" type="button" role="radio" aria-checked="true">映射</button>
+            <button id="source-raw" type="button" role="radio" aria-checked="false">原始</button>
+          </div>
+          <label class="size-pick"><span id="i18n-head-size">模型大小</span>
+            <select id="head-size"></select>
+          </label>
+        </div>
+        <label><span id="i18n-strength">排序强度</span> <input id="pref-strength" type="number" value="1" min="0.1" step="0.1"></label>
+        <button id="train-classification" type="button">训练分类</button>
+        <button id="train-ranking" type="button">训练排序</button>
+        <label><span id="i18n-result-count">结果张数</span> <input id="result-count" type="number" min="1" step="1" value="9"></label>
+        <button id="show-results" type="button" disabled>显示结果</button>
+      </div>
+      <div id="task-result" class="task-summary"></div>
+      </div>
+      <div class="busy-layer" id="busy-task" hidden>
+        <div class="busy-bar"><div class="busy-fill"></div></div>
+      </div>
+    </section>
+  </main>
+  <div id="busy-export" class="busy-top" hidden><div class="busy-fill"></div></div>
+  <p class="live" id="live" aria-live="polite"></p>
+  <div id="import-dialog" class="import-dialog" hidden>
+    <form class="import-panel" id="import-panel">
+      <h2 id="i18n-import-title">选择列</h2>
+      <p class="hint" id="i18n-import-note">先选索引列，再按层级顺序选择一个或多个标签列。确认后才会导入并训练。</p>
+      <label><span id="i18n-import-index">索引列</span> <select id="import-index"></select></label>
+      <div id="import-label-rows"></div>
+      <div class="import-actions">
+        <button id="import-add-label" type="button">添加标签列</button>
+        <button id="import-confirm" type="submit">导入并训练</button>
+        <button id="import-cancel" type="button">取消</button>
+      </div>
+    </form>
+  </div>
+  <div id="loupe" hidden><div id="loupe-inner"></div></div>
+  <div id="ghost" hidden></div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

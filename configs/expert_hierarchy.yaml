@@ -1,0 +1,16 @@
+# Simple hierarchy cell on the full expert catalog.
+# 中文说明：用 main_label_expert 建一级图，用 secondary_label_expert 建子图，并用 mapped_{class}_combined_score 检查分类概率。
+feature_path: "<path-to-features>"
+labels_csv: subset/expert_testset.csv
+index_column: index
+main_column: main_label_expert
+secondary_column: secondary_label_expert
+pool_size: 400
+round_size: 16
+rounds: 4
+out_dim: 32
+seed: 0
+epochs: 8
+eval_fraction: 0.3
+classifier_epochs: 20
+hidden_dim: 128
