@@ -1,6 +1,6 @@
 # HITL custom features — project context
 
-> **中文摘要**：标注板教程在 docs/tutorial.md；推荐范围没有 kNN 命中时仍按范围内分数取前 n 倍。
+> **中文摘要**：教程按当前产品改写，并附带 10 行导入示例 docs/disk_smooth_demo_input.csv。
 
 ## Goal
 
@@ -26,7 +26,7 @@ Traditional classification, then human-in-the-loop custom classification, then h
 - `subset/` — shared images: uncompressed `images.zip` (unpack to `subset/images/{index}.jpg`) and `expert_testset.csv`. All 3,960 expert indexes are included in the 10k tables; seed 0 fills the rest. The full 451,400-row catalog is not stored here.
 - `configs/expert_hierarchy.yaml` — hierarchy cell. `feature_path` is `<path-to-features>`; labels are `subset/expert_testset.csv`.
 - `configs/mergers_dev.yaml` — older single-class cell. Paths outside this repo are `<path-to-features>`, `<path-to-labels>`, and `<path-to-images>`.
-- `docs/tutorial.md` — English board tutorial. Figures are in `docs/tutorial_imgs/`.
+- `docs/tutorial.md` — English board tutorial for a new user. Figures are in `docs/tutorial_imgs/`. `docs/disk_smooth_demo_input.csv` is a 10-row import sample with columns `index` and `label`.
 
 Full catalogs stay outside this repository. This repo stores code, the 10k demo, and small run outputs. `runs/` and `web_sessions/` are gitignored. Checkpoints use `torch.save`. Feature matrices saved for a session use uncompressed `numpy.save`.
 
@@ -48,4 +48,4 @@ Tests passed: 96 passed and 2 skipped, conda `base`, on 2026-10-20. The two skip
 
 Branch `v1`. GitHub repository: `MingxiangFu/hitl_feature_lab`.
 
-Updates: `update/2026-10-15-v1.md`, `update/2026-10-15-expert-hierarchy-test.md`, `update/2026-10-15-drag-drop.md`, `update/2026-10-15-annotation-workflow.md`, `update/2026-10-15-graph-tasks-subset.md`, `update/2026-10-15-subset-media.md`, `update/2026-10-16-contact-sheet.md`, `update/2026-10-16-pool-predictions.md`, `update/2026-10-16-board-ui.md`, `update/2026-10-17-board-refine.md`, `update/2026-10-18-board-layout.md`, `update/2026-10-18-import-recycle.md`, `update/2026-10-19-release-ui.md`, `update/2026-10-19-names-umap.md`, `update/2026-10-19-umap-readme.md`, `update/2026-10-20-shared-feature-tables.md`, `update/2026-10-20-public-prep.md`, `update/2026-10-20-portable-paths.md`, `update/2026-10-20-board-results.md`, `update/2026-10-20-labels-umap.md`, `update/2026-10-20-board-fit.md`, `update/2026-10-20-projects.md`, `update/2026-10-20-scope-widen.md`, `update/2026-10-20-tutorial.md`.
+Updates: `update/2026-10-15-v1.md`, `update/2026-10-15-expert-hierarchy-test.md`, `update/2026-10-15-drag-drop.md`, `update/2026-10-15-annotation-workflow.md`, `update/2026-10-15-graph-tasks-subset.md`, `update/2026-10-15-subset-media.md`, `update/2026-10-16-contact-sheet.md`, `update/2026-10-16-pool-predictions.md`, `update/2026-10-16-board-ui.md`, `update/2026-10-17-board-refine.md`, `update/2026-10-18-board-layout.md`, `update/2026-10-18-import-recycle.md`, `update/2026-10-19-release-ui.md`, `update/2026-10-19-names-umap.md`, `update/2026-10-19-umap-readme.md`, `update/2026-10-20-shared-feature-tables.md`, `update/2026-10-20-public-prep.md`, `update/2026-10-20-portable-paths.md`, `update/2026-10-20-board-results.md`, `update/2026-10-20-labels-umap.md`, `update/2026-10-20-board-fit.md`, `update/2026-10-20-projects.md`, `update/2026-10-20-scope-widen.md`, `update/2026-10-20-tutorial.md`, `update/2026-10-20-tutorial-reader.md`.
