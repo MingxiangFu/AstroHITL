@@ -47,6 +47,7 @@ def _client(tmp_path, matrix, pool, out_dim=2):
             "out_dim": out_dim,
             "round_size": 2,
             "epochs": 1,
+            "name": "demo",
             "device": "cpu",
         },
     )
@@ -218,4 +219,11 @@ def test_umap_draws_the_pool_and_recolors_without_a_second_fit(tmp_path, monkeyp
     assert by_index[2]["color"] is None
     assert by_index[0]["color"] is None
     assert calls["n"] == 2
+    raw_xy = [(item["index"], item["x"], item["y"]) for item in colored]
     assert np.isfinite([item["x"] for item in colored]).all()
+    session._bump_layout()
+    third = client.post(f"/api/sessions/{session_id}/umap", json={})
+    assert third.status_code == 200, third.get_json()
+    refit = third.get_json()["umap"]["raw"]
+    assert [(item["index"], item["x"], item["y"]) for item in refit] == raw_xy
+    assert calls["n"] == 3

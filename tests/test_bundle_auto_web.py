@@ -127,6 +127,7 @@ def test_web_round_places_trains_and_reloads(tmp_path: Path):
             "out_dim": 4,
             "round_size": 4,
             "epochs": 1,
+            "name": "demo",
             "device": "cpu",
         },
     )

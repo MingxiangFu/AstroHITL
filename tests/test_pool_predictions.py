@@ -67,6 +67,7 @@ def test_session_stores_predictions_only_after_training(tmp_path, monkeypatch):
         epochs=1,
         device="cpu",
         pool_indices=[0, 1, 2, 3],
+        name="demo",
     )
     assert session.pool_predictions == []
     parent = session.graph.create_category("spiral")

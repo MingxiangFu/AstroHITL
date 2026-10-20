@@ -14,6 +14,10 @@
   var centerMode = "graph";
   var umapLayout = null;
   var umapToken = null;
+  var umapColorKey = null;
+  var umapPinnedPoint = null;
+  var resultView = "saved";
+  var labeledPick = null;
   var busy = false;
   var edgeSort = {key: "pair", dir: 1};
   var edgePage = 0;
@@ -36,7 +40,14 @@
       "dim": "输出维度",
       "round": "每轮张数",
       "epochs": "训练轮数",
-      "open-session": "打开会话",
+      "project-name": "项目名称",
+      "open-session": "创建项目",
+      "saved-projects": "已保存项目",
+      "load-project": "打开项目",
+      "name-required": "请填写项目名称",
+      "name-bad": "名称不能包含 | 或路径分隔符",
+      "name-taken": "已有同名项目",
+      "choose-project": "请选择一个已保存的项目",
       "freeze-off": "解冻",
       "freeze-on": "冻结",
       "freeze-label": "卡片是否冻结",
@@ -51,6 +62,7 @@
       "shot-large": "大图",
       "shot-label": "推荐图大小",
       "mode": "方式",
+      "scope-factor": "倍数",
       "recommend": "推荐",
       "mode-recommend": "推荐",
       "mode-labeled": "当前类别",
@@ -92,8 +104,15 @@
       "strength": "排序强度",
       "train-classification": "训练分类",
       "train-ranking": "训练排序",
-      "show-results": "显示结果",
+      "show-results": "显示分类结果",
+      "run-predict": "运行预测",
       "result-count": "结果张数",
+      "leaf-only": "只看没有子类的样本",
+      "mapper-tags": "全部类别",
+      "rename-class": "改名",
+      "rename-task": "结果名称",
+      "delete-task": "删除",
+      "confirm-delete-task": "删除这个结果？",
       "import-title": "选择列",
       "import-note": "先选索引列，再按层级顺序选择一个或多个标签列。确认后才会导入并训练。",
       "import-index": "索引列",
@@ -103,7 +122,7 @@
       "import-level": "标签列",
       "import-need-columns": "CSV 至少需要索引列和一个标签列",
       "import-bad-columns": "标签列不能重复，也不能与索引列相同",
-      "import-open-session": "请先打开会话，再导入 CSV",
+      "import-open-session": "请先创建或打开项目，再导入 CSV",
       "frac-train": "训练",
       "frac-val": "验证",
       "frac-test": "测试",
@@ -171,7 +190,14 @@
       "dim": "Output dimension",
       "round": "Round size",
       "epochs": "Epochs",
-      "open-session": "Open session",
+      "project-name": "Project name",
+      "open-session": "Create project",
+      "saved-projects": "Saved projects",
+      "load-project": "Open project",
+      "name-required": "Enter a project name",
+      "name-bad": "A name cannot contain | or a path separator",
+      "name-taken": "A project with this name already exists",
+      "choose-project": "Choose a saved project",
       "freeze-off": "Unfrozen",
       "freeze-on": "Frozen",
       "freeze-label": "Whether cards are frozen",
@@ -186,25 +212,26 @@
       "shot-large": "Large",
       "shot-label": "Recommendation image size",
       "mode": "Mode",
+      "scope-factor": "×n",
       "recommend": "Recommend",
-      "mode-recommend": "Recommend",
-      "mode-labeled": "This category",
-      "mode-recycle": "Recycle bin",
-      "mode-mapper": "Feature training",
-      "mode-task": "Classification",
+      "mode-recommend": "Suggest",
+      "mode-labeled": "Current",
+      "mode-recycle": "Recycle",
+      "mode-mapper": "Features",
+      "mode-task": "Classes",
       "mapper-size": "Map width",
       "head-size": "Model size",
-      "show-labeled": "This category",
+      "show-labeled": "Current",
       "show-recommend": "Recommend",
       "mapper-reset": "Map width changed. Train the map again.",
       "busy": "Another job is still running",
       "recycle-sample": "Recycle",
-      "recycle-count": "Recycle bin {n}",
+      "recycle-count": "Bin {n}",
       "page-prev": "Prev",
       "page-next": "Next",
-      "rec-well": "Recommend categories",
-      "select-all": "Select all",
-      "clear-rec": "Remove all",
+      "rec-well": "Categories",
+      "select-all": "All",
+      "clear-rec": "Clear",
       "graph-title": "Category graph",
       "mode-graph": "Graph",
       "mode-umap": "UMAP",
@@ -219,16 +246,23 @@
       "umap-read-error": "Could not read the UMAP result",
       "umap-empty": "UMAP returned no coordinates",
       "name-bar": "A name cannot contain |",
-      "confirm": "Confirm and train map",
+      "confirm": "Train map",
       "reset-mapper": "Reset map",
       "task-title": "Classification / ranking",
-      "add-class": "New empty class",
-      "clear-tasks": "Remove all",
+      "add-class": "New class",
+      "clear-tasks": "Clear",
       "strength": "Ranking strength",
-      "train-classification": "Train classification",
-      "train-ranking": "Train ranking",
+      "train-classification": "Train classifier",
+      "train-ranking": "Train ranker",
       "show-results": "Show results",
+      "run-predict": "Predict",
       "result-count": "Result count",
+      "leaf-only": "No subclass only",
+      "mapper-tags": "All categories",
+      "rename-class": "Rename",
+      "rename-task": "Result name",
+      "delete-task": "Delete",
+      "confirm-delete-task": "Delete this result?",
       "import-title": "Choose columns",
       "import-note": "Choose the index column, then one or more label columns in level order. Import starts only after you confirm.",
       "import-index": "Index column",
@@ -238,7 +272,7 @@
       "import-level": "Label column",
       "import-need-columns": "The CSV needs an index column and at least one label column",
       "import-bad-columns": "Label columns must be distinct and different from the index",
-      "import-open-session": "Open a session before importing a CSV",
+      "import-open-session": "Create or open a project before importing a CSV",
       "frac-train": "Train",
       "frac-val": "Val",
       "frac-test": "Test",
@@ -251,8 +285,8 @@
       "mapped-auc": "Mapped ROC AUC",
       "raw-pair": "Raw pairwise accuracy",
       "mapped-pair": "Mapped pairwise accuracy",
-      "edge-hide": "Hide edge table",
-      "edge-show": "Show edge table",
+      "edge-hide": "Hide edges",
+      "edge-show": "Show edges",
       "score-title": "Score bins",
       "score-note": "The bottom row shows a large image for each score bin. Hover magnifies while the magnifier is on.",
       "magnifier-off": "Magnifier off · Z",
@@ -284,9 +318,9 @@
       "remove-class": "Remove class",
       "mech-random": "Random",
       "mech-diversity": "Diversity",
-      "mech-unknown": "Unknown category",
-      "mech-certain": "Most certain",
-      "mech-uncertain": "Least certain",
+      "mech-unknown": "Unknown",
+      "mech-certain": "Certain",
+      "mech-uncertain": "Uncertain",
       "new-category": "New category name",
       "rename-category": "Category name",
       "task-class-name": "Task class name",
@@ -307,7 +341,10 @@
     "i18n-dim": "dim",
     "i18n-round": "round",
     "i18n-epochs": "epochs",
+    "i18n-project-name": "project-name",
     "open-session": "open-session",
+    "i18n-saved-projects": "saved-projects",
+    "load-project": "load-project",
     "freeze-off": "freeze-off",
     "freeze-on": "freeze-on",
     "edge-strength": "edge-strength",
@@ -319,6 +356,7 @@
     "shot-small": "shot-small",
     "shot-large": "shot-large",
     "i18n-mode": "mode",
+    "i18n-scope-factor": "scope-factor",
     "recommend": "recommend",
     "mode-recommend": "mode-recommend",
     "mode-labeled": "mode-labeled",
@@ -348,7 +386,10 @@
     "train-classification": "train-classification",
     "train-ranking": "train-ranking",
     "show-results": "show-results",
+    "run-predict": "run-predict",
     "i18n-result-count": "result-count",
+    "i18n-leaf-only": "leaf-only",
+    "i18n-mapper-tags": "mapper-tags",
     "i18n-import-title": "import-title",
     "i18n-import-note": "import-note",
     "i18n-import-index": "import-index",
@@ -407,6 +448,7 @@
 
   var JOB_IDS = [
     "recommend", "confirm", "reset-mapper", "train-classification", "train-ranking",
+    "show-results", "run-predict",
     "import-labels", "export-labels", "import-confirm", "mapper-size", "head-size",
     "mode-umap", "source-mapped", "source-raw"
   ];
@@ -575,11 +617,50 @@
       workbench.hidden = false;
     }
     render();
-    setStatus("");
+    setStatus(snapshot.name || "");
   }
 
   function fail(error) {
-    setStatus(error.message || String(error));
+    var message = error && error.message ? error.message : String(error);
+    if (message === "project name is required") {
+      message = t("name-required");
+    } else if (message === "project name cannot contain | or a path separator") {
+      message = t("name-bad");
+    } else if (message === "a project with this name already exists") {
+      message = t("name-taken");
+    }
+    setStatus(message);
+  }
+
+  function refreshProjects(selectId) {
+    var menu = byId("saved-projects");
+    if (!menu || typeof fetch !== "function") {
+      return Promise.resolve();
+    }
+    return fetch("/api/sessions").then(function (response) {
+      return response.json().then(function (payload) {
+        if (!response.ok) {
+          throw new Error((payload && payload.error) || response.statusText);
+        }
+        return payload;
+      });
+    }).then(function (payload) {
+      var projects = (payload && payload.projects) || [];
+      while (menu.firstChild) {
+        menu.removeChild(menu.firstChild);
+      }
+      projects.forEach(function (item) {
+        var option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.name || item.id;
+        menu.appendChild(option);
+      });
+      if (selectId) {
+        menu.value = selectId;
+      }
+    }).catch(function () {
+      /* The list is filled again the next time the page opens. */
+    });
   }
 
   function byId(id) {
@@ -594,7 +675,19 @@
   }
 
   on("open-session", "click", function () {
-    post("/api/sessions", {
+    var nameInput = byId("project-name");
+    var projectName = nameInput ? String(nameInput.value || "").trim() : "";
+    if (nameInput) {
+      if (!projectName) {
+        setStatus(t("name-required"));
+        return;
+      }
+      if (projectName.indexOf("|") >= 0 || projectName.indexOf("/") >= 0 || projectName.indexOf("\\") >= 0) {
+        setStatus(t("name-bad"));
+        return;
+      }
+    }
+    var body = {
       feature_path: byId("feature-path").value,
       img_dir: byId("img-dir").value,
       pool_size: Number(byId("pool-size").value),
@@ -602,6 +695,30 @@
       out_dim: Number(byId("out-dim").value),
       round_size: Number(byId("round-size").value),
       epochs: Number(byId("epochs").value)
+    };
+    if (nameInput) {
+      body.name = projectName;
+    }
+    post("/api/sessions", body).then(function (payload) {
+      apply(payload);
+      var created = payload && payload.snapshot ? payload.snapshot.id : "";
+      return refreshProjects(created);
+    }).catch(fail);
+  });
+
+  on("load-project", "click", function () {
+    var menu = byId("saved-projects");
+    if (!menu || !menu.value) {
+      setStatus(t("choose-project"));
+      return;
+    }
+    fetch("/api/sessions/" + encodeURIComponent(menu.value)).then(function (response) {
+      return response.json().then(function (payload) {
+        if (!response.ok) {
+          throw new Error((payload && payload.error) || response.statusText);
+        }
+        return payload;
+      });
     }).then(apply).catch(fail);
   });
 
@@ -609,14 +726,29 @@
     if (busy || viewMode === "recycle") {
       return;
     }
-    viewMode = "recommend";
+    var stayLabeled = viewMode === "labeled";
+    if (!stayLabeled) {
+      viewMode = "recommend";
+      labeledPick = null;
+    }
     pinnedSlots = null;
     page = 0;
     var mechanism = byId("mechanism");
-    postJob("/api/sessions/" + sessionId + "/recommend", {
+    var request = {
       mechanism: mechanism ? mechanism.value : "random",
-      category_ids: (snapshot && snapshot.recommend_set) || []
-    }, "busy-rec").then(apply).catch(fail);
+      category_ids: (snapshot && snapshot.recommend_set) || [],
+      within_labeled: stayLabeled
+    };
+    var factor = byId("scope-factor");
+    if (factor && String(factor.value).trim() !== "") {
+      request.scope_factor = Number(factor.value);
+    }
+    postJob("/api/sessions/" + sessionId + "/recommend", request, "busy-rec").then(function (payload) {
+      if (stayLabeled) {
+        labeledPick = payload && payload.chosen ? payload.chosen.slice() : [];
+      }
+      apply(payload);
+    }).catch(fail);
   });
 
   on("confirm", "click", function () {
@@ -675,13 +807,28 @@
   });
 
   on("show-results", "click", function () {
-    if (!snapshot || !snapshot.task_summary || snapshot.task_summary.kind !== "classification") {
+    if (!snapshot || !hasSavedResults()) {
       return;
     }
     viewMode = "results";
+    resultView = "saved";
     pinnedSlots = null;
     page = 0;
     renderImages();
+    renderChrome();
+  });
+
+  on("run-predict", "click", function () {
+    if (!snapshot || busy || !hasActiveTask()) {
+      return;
+    }
+    viewMode = "results";
+    resultView = "pool";
+    pinnedSlots = null;
+    page = 0;
+    postJob("/api/sessions/" + sessionId + "/tasks/project", {
+      count: resultLimit()
+    }, "busy-task").then(apply).catch(fail);
   });
 
   on("edge-table-toggle", "click", function () {
@@ -737,6 +884,7 @@
 
   function showList(mode) {
     viewMode = mode;
+    labeledPick = null;
     pinnedSlots = null;
     page = 0;
     renderImages();
@@ -802,7 +950,22 @@
   });
 
   on("result-count", "change", function () {
-    if (viewMode === "results") {
+    if (viewMode !== "results") {
+      return;
+    }
+    pinnedSlots = null;
+    page = 0;
+    if (resultView === "pool" && hasActiveTask()) {
+      postJob("/api/sessions/" + sessionId + "/tasks/project", {
+        count: resultLimit()
+      }, "busy-task").then(apply).catch(fail);
+      return;
+    }
+    renderImages();
+  });
+
+  on("leaf-only", "change", function () {
+    if (viewMode === "labeled") {
       pinnedSlots = null;
       page = 0;
       renderImages();
@@ -1058,11 +1221,18 @@
     fail(error);
   }
 
+  function labelColorKey(snap) {
+    return ((snap && snap.label_colors) || []).map(function (item) {
+      return item.index + ":" + item.color;
+    }).join(",");
+  }
+
   function maybeRefreshUmap() {
     if (centerMode !== "umap" || busy || umapLoading || !sessionId || !snapshot) {
       return;
     }
-    if (umapLayout && umapToken === snapshot.layout_token && !umapError) {
+    var colorKey = labelColorKey(snapshot);
+    if (umapLayout && umapToken === snapshot.layout_token && umapColorKey === colorKey && !umapError) {
       return;
     }
     umapError = "";
@@ -1081,6 +1251,7 @@
       }
       umapLayout = layout;
       umapToken = layout.token;
+      umapColorKey = labelColorKey(payload.snapshot || snapshot);
       umapError = "";
       apply(payload);
     }).catch(umapFailure);
@@ -1155,17 +1326,84 @@
       node.setAttribute("cy", String(pos.y));
       node.setAttribute("r", String(radius));
       node.setAttribute("fill", fill);
+      if (!point || !point.color) {
+        node.setAttribute("pointer-events", "none");
+      }
       svg.appendChild(node);
+      return node;
     }
+    var background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    background.setAttribute("x", "0");
+    background.setAttribute("y", "0");
+    background.setAttribute("width", "100%");
+    background.setAttribute("height", "100%");
+    background.setAttribute("fill", "transparent");
+    background.addEventListener("click", function () {
+      umapPinnedPoint = null;
+      hideUmapDetail();
+    });
+    svg.appendChild(background);
     rows.forEach(function (point) {
-      add(point, "rgba(90,100,112,0.22)", 1.6);
+      add(point, "rgba(90,100,112,0.22)", 0.85);
     });
     rows.forEach(function (point) {
       if (!point.color) {
         return;
       }
-      add(point, point.color, 2.6);
+      add(point, point.color, 1.35);
+      var pos = place(point);
+      var hit = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      hit.setAttribute("class", "umap-hit");
+      hit.setAttribute("cx", String(pos.x));
+      hit.setAttribute("cy", String(pos.y));
+      hit.setAttribute("r", "4");
+      hit.setAttribute("fill", "transparent");
+      hit.addEventListener("mouseenter", function () {
+        showUmapDetail(point);
+      });
+      hit.addEventListener("mouseleave", function () {
+        if (umapPinnedPoint && umapPinnedPoint.index === point.index) {
+          return;
+        }
+        if (umapPinnedPoint) {
+          showUmapDetail(umapPinnedPoint);
+          return;
+        }
+        hideUmapDetail();
+      });
+      hit.addEventListener("click", function (event) {
+        if (event.stopPropagation) {
+          event.stopPropagation();
+        }
+        umapPinnedPoint = point;
+        showUmapDetail(point);
+      });
+      svg.appendChild(hit);
     });
+  }
+
+  function showUmapDetail(point) {
+    var box = byId("umap-detail");
+    if (!box || !point) {
+      return;
+    }
+    box.hidden = false;
+    var img = byId("umap-detail-img");
+    if (img) {
+      img.alt = String(point.index);
+      img.src = "/media/" + sessionId + "/" + point.index;
+    }
+    var name = byId("umap-detail-name");
+    if (name) {
+      name.textContent = point.category ? point.category : ("#" + point.index);
+    }
+  }
+
+  function hideUmapDetail() {
+    var box = byId("umap-detail");
+    if (box) {
+      box.hidden = true;
+    }
   }
 
   function render() {
@@ -1188,6 +1426,7 @@
     renderWells();
     renderTaskClasses();
     renderTaskList();
+    renderMapperTags();
     renderTaskSummary();
     var confirm = byId("confirm");
     if (confirm) {
@@ -1330,6 +1569,14 @@
     setPressed("mode-recommend", viewMode === "recommend");
     setPressed("mode-labeled", viewMode === "labeled");
     setPressed("mode-recycle", viewMode === "recycle");
+    var leafRow = byId("leaf-only-row");
+    if (leafRow) {
+      leafRow.hidden = viewMode !== "labeled";
+    }
+    var factor = byId("scope-factor");
+    if (factor && document.activeElement !== factor) {
+      factor.value = String(snapshot.scope_factor || 10);
+    }
     renderRightMode();
     if (!busy) {
       syncIdleControls();
@@ -1347,12 +1594,31 @@
     }
   }
 
+  function byScoreDesc(rows) {
+    var scored = rows.some(function (image) {
+      return Number.isFinite(Number(image.score));
+    });
+    if (!scored) {
+      return rows;
+    }
+    return rows.slice().sort(function (a, b) {
+      var as = Number(a.score);
+      var bs = Number(b.score);
+      var aOk = Number.isFinite(as);
+      var bOk = Number.isFinite(bs);
+      if (aOk && bOk && as !== bs) {
+        return bs - as;
+      }
+      return Number(a.index) - Number(b.index);
+    });
+  }
+
   function roundImages() {
     var unplaced = (snapshot.images || []).filter(function (image) {
       return image.role === "unplaced";
     });
     if (unplaced.length) {
-      return unplaced;
+      return byScoreDesc(unplaced);
     }
     return (snapshot.images || []).slice();
   }
@@ -1385,14 +1651,118 @@
     return value;
   }
 
-  function imageSource() {
-    if (viewMode === "results" && snapshot.task_summary && snapshot.task_summary.kind === "classification") {
-      return (snapshot.task_summary.inference || []).slice(0, resultLimit()).map(function (item) {
-        return {index: item.index, role: "result", score: item.score};
+  function onlyLeaves() {
+    var node = byId("leaf-only");
+    if (!node) {
+      return true;
+    }
+    return !!node.checked;
+  }
+
+  function hasActiveTask() {
+    return (snapshot.tasks || []).some(function (task) { return task.active; });
+  }
+
+  function hasSavedResults() {
+    var summary = snapshot.task_summary;
+    if (!summary) {
+      return false;
+    }
+    if (summary.kind === "classification") {
+      return Array.isArray(summary.inference);
+    }
+    if (summary.kind === "ranking") {
+      return !!(snapshot.score_board && snapshot.score_board.bins);
+    }
+    return false;
+  }
+
+  function boardImages(board) {
+    var rows = [];
+    ((board && board.bins) || []).forEach(function (bin) {
+      (bin.images || []).forEach(function (image) {
+        rows.push({
+          index: image.index,
+          role: "result",
+          score: Number(image.score),
+          label: image.label || null,
+          color: image.color || null
+        });
+      });
+    });
+    return rows;
+  }
+
+  function savedResultRows() {
+    var summary = snapshot.task_summary;
+    if (summary && summary.kind === "classification" && Array.isArray(summary.inference)) {
+      return summary.inference.map(function (item) {
+        return {
+          index: item.index,
+          role: "result",
+          score: Number(item.score),
+          label: item.label || null,
+          color: item.color || null
+        };
       });
     }
+    if (summary && summary.kind === "ranking") {
+      return boardImages(snapshot.score_board);
+    }
+    return [];
+  }
+
+  function labeledItems() {
+    var rows = (snapshot.labeled_images || []).filter(function (image) {
+      if (!onlyLeaves()) {
+        return true;
+      }
+      var parent = snapshot.view_parent;
+      if (!parent) {
+        return !image.parent_id;
+      }
+      return image.category_id === parent;
+    });
+    if (!labeledPick || !labeledPick.length) {
+      return rows;
+    }
+    var byIndex = {};
+    var rest = [];
+    rows.forEach(function (image) {
+      byIndex[image.index] = image;
+    });
+    var ordered = [];
+    labeledPick.forEach(function (index) {
+      if (byIndex[index]) {
+        ordered.push(byIndex[index]);
+        delete byIndex[index];
+      }
+    });
+    rows.forEach(function (image) {
+      if (byIndex[image.index]) {
+        rest.push(image);
+      }
+    });
+    return ordered.concat(rest);
+  }
+
+  function imageSource() {
+    if (viewMode === "results") {
+      var rows = resultView === "pool" && snapshot.projection && snapshot.projection.images
+        ? snapshot.projection.images.map(function (item) {
+          return {
+            index: item.index,
+            role: "result",
+            score: Number(item.score),
+            label: item.label || null,
+            color: item.color || null
+          };
+        })
+        : savedResultRows();
+      return byScoreDesc(rows).slice(0, resultLimit());
+    }
     if (viewMode === "labeled") {
-      return (snapshot.labeled_images || []).slice();
+      return labeledItems();
     }
     if (viewMode === "recycle") {
       var bin = snapshot.recycle || {};
@@ -1470,8 +1840,11 @@
     }
     var show = byId("show-results");
     if (show) {
-      var summary = snapshot.task_summary;
-      show.disabled = busy || !(summary && summary.kind === "classification" && Array.isArray(summary.inference));
+      show.disabled = busy || !hasSavedResults();
+    }
+    var predict = byId("run-predict");
+    if (predict) {
+      predict.disabled = busy || !hasActiveTask();
     }
   }
 
@@ -1507,10 +1880,16 @@
       event.dataTransfer.setData("text/plain", String(image.index));
     });
     fig.appendChild(card);
+    var border = image.color || image.prediction_color;
+    if (border) {
+      card.style.boxShadow = "inset 0 0 0 4px " + border;
+    }
     var caption = document.createElement("figcaption");
     var name = document.createElement("span");
     name.className = "cap-name";
-    if (typeof image.score === "number") {
+    if (image.label && typeof image.score === "number" && Number.isFinite(image.score)) {
+      name.textContent = image.label + "  " + image.score.toFixed(2);
+    } else if (typeof image.score === "number" && Number.isFinite(image.score)) {
       name.textContent = "#" + image.index + "  " + image.score.toFixed(2);
     } else {
       name.textContent = image.prediction ? image.prediction : ("#" + image.index);
@@ -1556,6 +1935,9 @@
     rootButton.type = "button";
     rootButton.textContent = t("root");
     rootButton.addEventListener("click", function () {
+      labeledPick = null;
+      pinnedSlots = null;
+      page = 0;
       post("/api/sessions/" + sessionId + "/view", {category_id: null}).then(apply).catch(fail);
     });
     root.appendChild(rootButton);
@@ -1564,6 +1946,9 @@
       button.type = "button";
       button.textContent = crumb.name;
       button.addEventListener("click", function () {
+        labeledPick = null;
+        pinnedSlots = null;
+        page = 0;
         post("/api/sessions/" + sessionId + "/view", {category_id: crumb.id}).then(apply).catch(fail);
       });
       root.appendChild(button);
@@ -1658,9 +2043,12 @@
       var card = document.createElement("div");
       card.className = "cat-card category";
       card.dataset.id = cat.id;
-      card.style["--c"] = cat.color || "#2f5d73";
+      var tagColor = cat.color || "#2f5d73";
+      card.style["--c"] = tagColor;
       card.style.borderWidth = outlineWidth(cat) + "px";
       card.style.borderLeftWidth = "6px";
+      card.style.borderColor = tagColor;
+      card.style.borderLeftColor = tagColor;
       var point = categoryPoint(cat, i, count, size);
       centers[cat.id] = point;
       card.style.left = point.x + "px";
@@ -1738,6 +2126,10 @@
       var clickTimer = null;
       card.addEventListener("dblclick", function () {
         clearTimeout(clickTimer);
+        viewMode = "labeled";
+        labeledPick = null;
+        pinnedSlots = null;
+        page = 0;
         post("/api/sessions/" + sessionId + "/view", {category_id: cat.id}).then(apply).catch(fail);
       });
       card.addEventListener("click", function () {
@@ -2024,20 +2416,36 @@
       down.type = "button";
       down.textContent = t("down");
       down.addEventListener("click", function () { moveClass(classIndex, 1); });
+      var renameClass = document.createElement("button");
+      renameClass.type = "button";
+      renameClass.textContent = t("rename-class");
+      renameClass.addEventListener("click", function () {
+        var name = typedName("task-class-name", taskClass.name);
+        if (!name || name === taskClass.name) {
+          return;
+        }
+        var next = taskClasses();
+        next[classIndex].name = name;
+        saveDraft(next);
+      });
       var removeClass = document.createElement("button");
       removeClass.type = "button";
-      removeClass.className = "tag-x";
-      removeClass.textContent = "×";
+      removeClass.className = "class-delete";
+      removeClass.textContent = t("delete-task");
       removeClass.setAttribute("aria-label", t("remove-class"));
       removeClass.addEventListener("click", function () {
         var next = taskClasses();
         next.splice(classIndex, 1);
         saveDraft(next);
       });
+      var actions = document.createElement("div");
+      actions.className = "task-class-actions";
+      actions.appendChild(up);
+      actions.appendChild(down);
+      actions.appendChild(renameClass);
+      actions.appendChild(removeClass);
       head.appendChild(title);
-      head.appendChild(up);
-      head.appendChild(down);
-      head.appendChild(removeClass);
+      head.appendChild(actions);
       var tags = document.createElement("div");
       tags.className = "tag-list";
       (taskClass.category_ids || []).forEach(function (id) {
@@ -2243,16 +2651,76 @@
     }
     root.innerHTML = "";
     (snapshot.tasks || []).forEach(function (task) {
+      var wrap = document.createElement("div");
+      wrap.className = "saved-task";
       var button = document.createElement("button");
       button.type = "button";
       button.textContent = task.name;
       if (task.active) {
         button.className = "active-task";
+        button.setAttribute("aria-pressed", "true");
       }
       button.addEventListener("click", function () {
         post("/api/sessions/" + sessionId + "/tasks/select", {task_id: task.id}).then(apply).catch(fail);
       });
-      root.appendChild(button);
+      var tools = document.createElement("div");
+      tools.className = "saved-task-tools";
+      var rename = document.createElement("button");
+      rename.type = "button";
+      rename.textContent = t("rename-class");
+      rename.addEventListener("click", function () {
+        var name = typedName("rename-task", task.name);
+        if (!name || name === task.name) {
+          return;
+        }
+        post("/api/sessions/" + sessionId + "/tasks/rename", {
+          task_id: task.id,
+          name: name
+        }).then(apply).catch(fail);
+      });
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = t("delete-task");
+      remove.addEventListener("click", function () {
+        if (!window.confirm(t("confirm-delete-task"))) {
+          return;
+        }
+        post("/api/sessions/" + sessionId + "/tasks/delete", {
+          task_id: task.id
+        }).then(apply).catch(fail);
+      });
+      tools.appendChild(rename);
+      tools.appendChild(remove);
+      wrap.appendChild(button);
+      wrap.appendChild(tools);
+      root.appendChild(wrap);
+    });
+  }
+
+  function renderMapperTags() {
+    var root = byId("mapper-tags");
+    if (!root || !snapshot) {
+      return;
+    }
+    root.innerHTML = "";
+    (snapshot.all_categories || []).forEach(function (cat) {
+      var row = document.createElement("div");
+      row.className = "tag source-tag";
+      var color = cat.color || "#2f5d73";
+      row.style.background = color;
+      row.style.color = "#fff";
+      row.style["--c"] = color;
+      var name = document.createElement("span");
+      name.className = "tag-name";
+      name.textContent = cat.name;
+      row.appendChild(name);
+      row.addEventListener("mousedown", function (event) {
+        if (event.button && event.button !== 0) {
+          return;
+        }
+        startTagDrag(event, cat, row);
+      });
+      root.appendChild(row);
     });
   }
 
@@ -2884,6 +3352,7 @@
 
   bindStaticWellButtons();
   setLanguage(lang);
+  refreshProjects();
 
   function bindStaticWellButtons() {
     ["well-recommend"].forEach(function (id) {

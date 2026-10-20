@@ -36,6 +36,12 @@ Open `http://127.0.0.1:5002`. The server listens on that address only. The form 
 
 Each session, its graph, and its feature map are stored under `web_sessions/`.
 
+## Tutorial
+
+> **中文说明**：标注板的分步说明在 docs/tutorial.md，配图在 docs/tutorial_imgs。
+
+`docs/tutorial.md` is the board tutorial, with figures in `docs/tutorial_imgs/`. It covers setup, named projects, the category graph, recommenders, the feature map, classification and ranking, and UMAP.
+
 ## Data
 
 > **中文说明**：FAMA-base 与 AE 两份一万行特征表共用同一组星表索引及 subset 中的同一套图像，CSV 导入则把标注合并进当前已打开的类别图。

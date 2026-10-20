@@ -22,7 +22,12 @@
     <label><span id="i18n-dim">输出维度</span> <input id="out-dim" type="number" value="32"></label>
     <label><span id="i18n-round">每轮张数</span> <input id="round-size" type="number" value="12"></label>
     <label><span id="i18n-epochs">训练轮数</span> <input id="epochs" type="number" value="30"></label>
-    <button id="open-session" type="button">打开会话</button>
+    <label><span id="i18n-project-name">项目名称</span> <input id="project-name" size="24"></label>
+    <button id="open-session" type="button">创建项目</button>
+    <label><span id="i18n-saved-projects">已保存项目</span>
+      <select id="saved-projects"></select>
+    </label>
+    <button id="load-project" type="button">打开项目</button>
   </section>
   <div class="toolbar">
     <div class="seg" id="freeze-group" role="radiogroup" aria-label="卡片是否冻结">
@@ -64,11 +69,18 @@
         <label><span id="i18n-mode">方式</span>
           <select id="mechanism"></select>
         </label>
+        <label class="scope-factor"><span id="i18n-scope-factor">倍数</span>
+          <input id="scope-factor" type="number" min="1" step="1" value="10">
+        </label>
         <button id="recommend" type="button">推荐</button>
         <button id="page-prev" type="button">上一页</button>
         <button id="page-next" type="button">下一页</button>
       </div>
       <div class="shots" id="images"></div>
+      <label class="leaf-only" id="leaf-only-row" hidden>
+        <input id="leaf-only" type="checkbox" checked>
+        <span id="i18n-leaf-only">只看没有子类的样本</span>
+      </label>
       <section class="well" id="well-recommend" data-well="recommend">
         <div class="well-head">
           <h2 id="i18n-rec-well">推荐类别</h2>
@@ -110,6 +122,10 @@
             <svg id="umap-mapped"></svg>
           </div>
         </div>
+        <div id="umap-detail" class="umap-detail" hidden>
+          <img id="umap-detail-img" alt="">
+          <span id="umap-detail-name"></span>
+        </div>
       </div>
       <div class="busy-layer" id="busy-graph" hidden>
         <div class="busy-bar"><div class="busy-fill"></div></div>
@@ -135,6 +151,8 @@
           <button id="reset-mapper" type="button">重置映射</button>
         </div>
         <table id="distances"></table>
+        <p class="mapper-tags-label" id="i18n-mapper-tags">全部类别</p>
+        <div id="mapper-tags" class="tag-list"></div>
       </div>
       <div id="panel-task" hidden>
       <div class="panel-bar">
@@ -163,7 +181,8 @@
         <button id="train-classification" type="button">训练分类</button>
         <button id="train-ranking" type="button">训练排序</button>
         <label><span id="i18n-result-count">结果张数</span> <input id="result-count" type="number" min="1" step="1" value="9"></label>
-        <button id="show-results" type="button" disabled>显示结果</button>
+        <button id="show-results" type="button" disabled>显示分类结果</button>
+        <button id="run-predict" type="button" disabled>运行预测</button>
       </div>
       <div id="task-result" class="task-summary"></div>
       </div>

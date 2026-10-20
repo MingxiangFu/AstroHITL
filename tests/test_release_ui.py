@@ -33,6 +33,7 @@ def _session(tmp_path, matrix, pool, epochs=1):
             "out_dim": 4,
             "round_size": 2,
             "epochs": epochs,
+            "name": "demo",
             "device": "cpu",
         },
     )

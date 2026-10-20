@@ -25,6 +25,7 @@ def _session(tmp_path, matrix, pool):
             "out_dim": 4,
             "round_size": 2,
             "epochs": 1,
+            "name": "demo",
             "device": "cpu",
         },
     )
@@ -32,7 +33,7 @@ def _session(tmp_path, matrix, pool):
     return client, created.get_json()["snapshot"]["id"]
 
 
-def test_inside_category_does_not_recommend_outside_samples(tmp_path):
+def test_labeled_view_screens_inside_the_category(tmp_path):
     matrix = np.array(
         [
             [1.0, 0.0],
@@ -54,15 +55,21 @@ def test_inside_category_does_not_recommend_outside_samples(tmp_path):
     session.graph.assign(3, parent)
     entered = client.post(f"/api/sessions/{session_id}/view", json={"category_id": parent})
     assert entered.status_code == 200
-    chosen = client.post(
+    refused = client.post(
         f"/api/sessions/{session_id}/recommend",
         json={"mechanism": "random", "category_ids": []},
+    )
+    assert refused.status_code == 400
+    assert "trained mapper" in refused.get_json()["error"]
+    chosen = client.post(
+        f"/api/sessions/{session_id}/recommend",
+        json={"mechanism": "random", "category_ids": [], "within_labeled": True},
     )
     assert chosen.status_code == 200
     assert chosen.get_json()["chosen"] == [3]
     limited = client.post(
         f"/api/sessions/{session_id}/recommend",
-        json={"mechanism": "certain", "category_ids": [child]},
+        json={"mechanism": "certain", "category_ids": [child], "within_labeled": True},
     )
     assert limited.get_json()["chosen"] == [3]
 

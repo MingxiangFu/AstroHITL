@@ -39,6 +39,7 @@ def test_relative_subset_images_are_served_by_catalog_index(tmp_path, monkeypatc
             "out_dim": 4,
             "round_size": 2,
             "epochs": 1,
+            "name": "demo",
             "device": "cpu",
         },
     )

@@ -23,6 +23,7 @@ def _session(tmp_path, matrix, pool):
             "out_dim": 4,
             "round_size": 2,
             "epochs": 1,
+            "name": "demo",
             "device": "cpu",
         },
     )

@@ -65,6 +65,7 @@ def _session(tmp_path, matrix, pool):
             "out_dim": 4,
             "round_size": 2,
             "epochs": 1,
+            "name": "demo",
             "device": "cpu",
         },
     )
@@ -118,10 +119,12 @@ def test_task_result_samples_skip_training_images_and_other_categories(tmp_path)
     train_ids = split["left"]["train"] + split["right"]["train"]
     expected = inference_ids(list(range(16)), train_ids)
     shown = [item["index"] for item in summary["inference"]]
-    assert shown == expected
+    assert sorted(shown) == sorted(expected)
+    scores = [float(item["score"]) for item in summary["inference"]]
+    assert scores == sorted(scores, reverse=True)
     assert set(shown).isdisjoint(train_ids)
     assert set(shown).isdisjoint(set(range(16, 20)))
     assert set(shown) | set(train_ids) == set(range(16))
     assert all(0.0 <= float(item["score"]) <= 1.0 for item in summary["inference"])
     loaded = SessionStore(tmp_path / "sessions").get(session_id)
-    assert [item["index"] for item in loaded.task_summary["inference"]] == expected
+    assert sorted(item["index"] for item in loaded.task_summary["inference"]) == sorted(expected)

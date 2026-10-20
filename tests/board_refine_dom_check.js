@@ -406,7 +406,7 @@ async function main() {
   dispatch(document.getElementById("lang-toggle"), "click");
   check(store["hitl-board-lang"] === "en", "language choice was not stored");
   check(document.getElementById("lang-toggle").textContent === "中文", "language button did not offer Chinese");
-  check(document.getElementById("open-session").textContent === "Open session", "chrome stayed in Chinese");
+  check(document.getElementById("open-session").textContent === "Create project", "chrome stayed in Chinese");
 
   const uiBefore = calls.filter(function (call) {
     return call.url.indexOf("/ui") >= 0 && Object.prototype.hasOwnProperty.call(call.body, "frozen");

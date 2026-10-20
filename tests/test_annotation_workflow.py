@@ -21,6 +21,7 @@ def _app(tmp_path, matrix, pool, round_size=4):
             "out_dim": 4,
             "round_size": round_size,
             "epochs": 1,
+            "name": "demo",
             "device": "cpu",
         },
     )
@@ -56,9 +57,15 @@ def test_parent_count_and_inside_recommend_stays_in_the_category(tmp_path):
         json={"category_id": parent},
     )
     assert entered.status_code == 200
-    chosen = client.post(
+    refused = client.post(
         f"/api/sessions/{session_id}/recommend",
         json={"mechanism": "certain"},
+    )
+    assert refused.status_code == 400
+    assert "trained mapper" in refused.get_json()["error"]
+    chosen = client.post(
+        f"/api/sessions/{session_id}/recommend",
+        json={"mechanism": "certain", "within_labeled": True},
     )
     assert chosen.status_code == 200
     assert chosen.get_json()["chosen"] == [3]
@@ -283,6 +290,7 @@ def test_label_file_builds_a_graph_and_leaves_the_session_editable(tmp_path):
             "out_dim": 4,
             "round_size": 1,
             "epochs": 1,
+            "name": "demo",
             "device": "cpu",
         },
     )

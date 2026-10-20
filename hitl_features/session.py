@@ -29,11 +29,18 @@ from hitl_features.modelsizes import (
     head_parameter_count,
     mapper_options,
 )
-from hitl_features.classify import evaluate_binary, evaluate_multiclass, fit_classifier, predict_proba
+from hitl_features.classify import (
+    MlpClassifier,
+    evaluate_binary,
+    evaluate_multiclass,
+    fit_classifier,
+    predict_proba,
+)
 from hitl_features.pool_predict import predict_pool
 from hitl_features.preview import category_preview
-from hitl_features.rank import fit_ranker, pairwise_preference_accuracy
-from hitl_features.recommend import recommend
+from hitl_features.rank import Ranker, ScoreNet, fit_ranker, pairwise_preference_accuracy
+from hitl_features.recommend import knn_class_probabilities, normalized_entropy, recommend
+from hitl_features.space import cosine_distance
 from hitl_features.score_board import equal_width_bins, fixed_score_indices
 from hitl_features.tasks import inference_ids, normalize_fractions, stratified_split, task_labels
 from hitl_features.train import train_mapper
@@ -106,10 +113,12 @@ class LabSession:
         self.index_to_row = {index: row for row, index in enumerate(self.pool_indices)}
         self.out_dim = int(out_dim)
         self.round_size = int(round_size)
+        self.scope_factor = 10
         self.seed = int(seed)
         self.img_dir = img_dir
         self.device = device
         self.epochs = int(epochs)
+        self.name = ""
         self.graph = CategoryGraph()
         self.mapper = FeatureMapper(self.features.shape[1], self.out_dim)
         self.head_hidden = (64, 32)
@@ -117,6 +126,7 @@ class LabSession:
         self.rng = np.random.default_rng(self.seed + 1)
         self.view_parent: str | None = None
         self.round_ids: list[int] = []
+        self.round_ranks: dict[int, dict] = {}
         self.unplaced: set[int] = set()
         self.round_number = 0
         self.mapper_trained = False
@@ -133,33 +143,53 @@ class LabSession:
         self.frozen = False
         self.edge_mode = "distance"
         self.shot_size = "small"
+        self.projection = None
         self._mapped_cache = None
         self._layout_token = 0
-        self._umap_cache = None
+        self._raw_umap = None
+        self._raw_pool_key = None
+        self._mapped_umap = None
+        self._mapped_pool_key = None
 
     @property
     def in_dim(self) -> int:
         return int(self.features.shape[1])
 
     def recommend_round(
-        self, mechanism: str, category_ids: list[str] | None = None
+        self,
+        mechanism: str,
+        category_ids: list[str] | None = None,
+        within_labeled: bool = False,
+        scope_factor: int | None = None,
     ) -> list[int]:
         if mechanism not in MECHANISMS and mechanism != "algorithmic":
             raise ValueError(f"unknown mechanism: {mechanism}")
+        if scope_factor is not None:
+            self.scope_factor = _positive_factor(scope_factor)
         if category_ids is not None:
             self.recommend_set = [
                 str(value)
                 for value in category_ids
-                if not self.graph.is_recycled_category(str(value))
+                if str(value) in self.graph.categories
+                and not self.graph.is_recycled_category(str(value))
             ]
-        level_ids = [
-            cat.id
-            for cat in self.graph.children(self.view_parent)
-            if not self.graph.is_recycled_category(cat.id)
-        ]
-        allowed = {cat_id for cat_id in self.recommend_set if cat_id in level_ids}
-        classes = [cat_id for cat_id in level_ids if not allowed or cat_id in allowed]
-        candidates, ref_ids, ref_labels = self._recommend_scope(classes)
+        classes = self._scope_classes()
+        widened: dict[int, dict] | None = None
+        if within_labeled:
+            candidates, ref_ids, ref_labels = self._recommend_scope(classes)
+        else:
+            targets = self._subclass_targets(classes)
+            if targets:
+                candidates, ref_ids, ref_labels, widened = self._predicted_subclass_scope(targets)
+                classes = targets
+            else:
+                roots = [
+                    cat_id
+                    for cat_id in classes
+                    if self.graph.categories[cat_id].parent_id is None
+                ]
+                candidates, ref_ids, ref_labels = self._root_scope(roots or classes)
+                classes = roots or classes
         mapped = self.mapper_trained
         matrix = self._pool_matrix(mapped)
         width = matrix.shape[1] if matrix.ndim == 2 else self.in_dim
@@ -178,36 +208,176 @@ class LabSession:
             round_index=self.round_number + 1,
         )
         self.round_ids = chosen
+        if widened is not None:
+            self.round_ranks = {
+                int(index): widened[int(index)] for index in chosen if int(index) in widened
+            }
+        else:
+            self.round_ranks = self._scope_ranks(
+                mechanism, candidates, candidate_vectors, ref_vectors, ref_labels
+            )
         self.unplaced = set(chosen)
         if self.mapper_trained:
             self._refresh_pool_predictions()
         self.save()
         return chosen
 
-    def _recommend_scope(self, class_ids: list[str]) -> tuple[list[int], list[int], list[str]]:
-        """Candidates and labeled neighbors for the current level.
+    def _scope_classes(self) -> list[str]:
+        """Selected recommend tags, or every category at the open level."""
+        if self.recommend_set:
+            return list(self.recommend_set)
+        return [
+            cat.id
+            for cat in self.graph.children(self.view_parent)
+            if not self.graph.is_recycled_category(cat.id)
+        ]
 
-        At the root, candidates are unlabeled pool rows and neighbors are
-        samples whose root category is in ``class_ids``. Inside a category,
-        candidates are samples assigned to that category with no subclass,
-        and neighbors are samples under that same category that already have
-        a child in ``class_ids``. Samples outside the category are omitted.
+    def _subclass_targets(self, class_ids: list[str]) -> list[str]:
+        return [
+            cat_id
+            for cat_id in class_ids
+            if cat_id in self.graph.categories and self.graph.categories[cat_id].parent_id is not None
+        ]
+
+    def _root_scope(self, class_ids: list[str]) -> tuple[list[int], list[int], list[str]]:
+        """Unlabeled pool rows, compared with labeled roots in ``class_ids``."""
+        allowed = set(class_ids)
+        candidates = [
+            index for index in self.pool_indices if self.graph.category_of(index) is None
+        ]
+        refs: list[int] = []
+        labels: list[str] = []
+        for index, owner in self.graph.assignments.items():
+            if index not in self.index_to_row or self.graph.is_recycled_sample(index):
+                continue
+            root_id = self.graph.path(owner)[0]
+            if root_id in allowed:
+                refs.append(index)
+                labels.append(root_id)
+        return candidates, refs, labels
+
+    def _predicted_subclass_scope(
+        self, class_ids: list[str]
+    ) -> tuple[list[int], list[int], list[str], dict[int, dict] | None]:
+        """Pool rows the mapper assigns to ``class_ids``, not only rows already under the parent."""
+        if not self.mapper_trained:
+            raise ValueError("subclass recommend needs a trained mapper")
+        targets = set(class_ids)
+        parents = {
+            self.graph.categories[cat_id].parent_id
+            for cat_id in class_ids
+            if self.graph.categories[cat_id].parent_id is not None
+        }
+        siblings: set[str] = set()
+        for parent in parents:
+            for child in self.graph.children(parent):
+                if not self.graph.is_recycled_category(child.id):
+                    siblings.add(child.id)
+        refs: list[int] = []
+        labels: list[str] = []
+        for index, owner in self.graph.assignments.items():
+            if index not in self.index_to_row or self.graph.is_recycled_sample(index):
+                continue
+            for parent in parents:
+                child_id = _child_under(self.graph, parent, owner)
+                if child_id in siblings:
+                    refs.append(index)
+                    labels.append(child_id)
+                    break
+        if not refs:
+            raise ValueError("subclass recommend needs labeled examples")
+        matrix = self._pool_matrix(mapped=True)
+        width = matrix.shape[1] if matrix.ndim == 2 else self.in_dim
+        ref_vectors = self._matrix_rows(matrix, refs, width)
+        pool_vectors = self._matrix_rows(matrix, list(self.pool_indices), width)
+        names, probabilities = knn_class_probabilities(pool_vectors, ref_vectors, labels)
+        if not names:
+            raise ValueError("subclass recommend needs labeled examples")
+        predicted = [names[int(row)] for row in probabilities.argmax(axis=1)]
+        blocked = set(refs)
+        candidates = [
+            index
+            for index, label in zip(self.pool_indices, predicted)
+            if label in targets and index not in blocked
+        ]
+        target_refs = [index for index, label in zip(refs, labels) if label in targets]
+        target_labels = [label for label in labels if label in targets]
+        if candidates:
+            return candidates, target_refs, target_labels, None
+        eligible = [index for index in self.pool_indices if index not in blocked]
+        widened_ids, widened_ranks = self._widen_scope_candidates(
+            class_ids, probabilities, names, eligible
+        )
+        return widened_ids, target_refs, target_labels, widened_ranks
+
+    def _widen_scope_candidates(
+        self,
+        class_ids: list[str],
+        probabilities: np.ndarray,
+        names: list[str],
+        eligible: list[int],
+    ) -> tuple[list[int], dict[int, dict]]:
+        """Top ``scope_factor`` rounds, scored by the best scoped class.
+
+        A sample stays in this slice even when another class has the higher
+        probability. The stored rank names that scoped class, not the vote.
+        """
+        index_of = {name: column for column, name in enumerate(names)}
+        row_of = {int(index): row for row, index in enumerate(self.pool_indices)}
+        scored: list[tuple[float, int, str]] = []
+        for index in eligible:
+            best_id = class_ids[0]
+            best_score = -1.0
+            row = row_of[int(index)]
+            for cat_id in class_ids:
+                column = index_of.get(cat_id)
+                score = float(probabilities[row, column]) if column is not None else 0.0
+                if score > best_score:
+                    best_score = score
+                    best_id = cat_id
+            if best_score < 0:
+                best_score = 0.0
+            scored.append((best_score, int(index), best_id))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        limit = int(self.scope_factor) * max(int(self.round_size), 0)
+        picked = scored[:limit]
+        candidates = [index for _score, index, _cat_id in picked]
+        ranks = {
+            index: self._rank_payload(cat_id, score) for score, index, cat_id in picked
+        }
+        return candidates, ranks
+
+    def _recommend_scope(self, class_ids: list[str]) -> tuple[list[int], list[int], list[str]]:
+        """Samples already labeled at the open category.
+
+        Inside a category, candidates are samples assigned to that category
+        with no subclass. At the root, candidates are samples assigned directly
+        to a selected root category. Neighbors are samples that already have a
+        child in ``class_ids``.
         """
         allowed = set(class_ids)
         parent = self.view_parent
         if parent is None:
-            candidates = [
-                index for index in self.pool_indices if self.graph.category_of(index) is None
-            ]
-            refs: list[int] = []
-            labels: list[str] = []
+            candidates: list[int] = []
+            for cat_id in class_ids:
+                cat = self.graph.categories.get(cat_id)
+                if cat is None or cat.parent_id is not None or self.graph.is_recycled_category(cat_id):
+                    continue
+                candidates.extend(
+                    index for index in self.graph.samples(cat_id) if index in self.index_to_row
+                )
+            refs = []
+            labels = []
             for index, owner in self.graph.assignments.items():
                 if index not in self.index_to_row or self.graph.is_recycled_sample(index):
                     continue
                 root_id = self.graph.path(owner)[0]
-                if root_id in allowed:
+                if root_id not in allowed or owner == root_id:
+                    continue
+                child_id = _child_under(self.graph, root_id, owner)
+                if child_id in allowed or root_id in allowed:
                     refs.append(index)
-                    labels.append(root_id)
+                    labels.append(child_id or owner)
             return candidates, refs, labels
         candidates = [
             index for index in self.graph.samples(parent) if index in self.index_to_row
@@ -222,6 +392,71 @@ class LabSession:
                 refs.append(index)
                 labels.append(child_id)
         return candidates, refs, labels
+
+    def _scope_ranks(
+        self,
+        mechanism: str,
+        candidates: list[int],
+        candidate_vectors: np.ndarray,
+        ref_vectors: np.ndarray,
+        ref_labels: list[str],
+    ) -> dict[int, dict]:
+        """Class and score that ``certain`` or ``uncertain`` actually ranked with.
+
+        The pool vote is a different question: it mixes every labeled root.
+        A one-class scope ranks by distance to that class alone, so the caption
+        must name that class. A higher score is the one placed first.
+        """
+        if mechanism not in ("certain", "uncertain"):
+            return {}
+        if not candidates or not ref_labels or ref_vectors.size == 0:
+            return {}
+        if len(set(ref_labels)) < 2:
+            distances = cosine_distance(candidate_vectors, ref_vectors)
+            mean = np.asarray(distances.mean(axis=1), dtype=np.float64).reshape(-1)
+            label = str(ref_labels[0])
+            ranks = {}
+            for row, index in enumerate(candidates):
+                distance = float(mean[row])
+                score = (1.0 - distance) if mechanism == "certain" else distance
+                ranks[int(index)] = self._rank_payload(label, score)
+            return ranks
+        names, probabilities = knn_class_probabilities(
+            candidate_vectors, ref_vectors, ref_labels
+        )
+        if not names:
+            return {}
+        entropy = normalized_entropy(probabilities)
+        ranks = {}
+        for row, index in enumerate(candidates):
+            class_index = int(np.argmax(probabilities[row]))
+            label = names[class_index]
+            score = float(entropy[row] if mechanism == "uncertain" else probabilities[row, class_index])
+            ranks[int(index)] = self._rank_payload(label, score)
+        return ranks
+
+    def _rank_payload(self, category_id: str, score: float) -> dict:
+        name = category_id
+        if category_id in self.graph.categories:
+            name = self.graph.categories[category_id].name
+        return {
+            "label": name,
+            "score": float(score),
+            "color": category_color(category_id) if category_id in self.graph.categories else None,
+        }
+
+    def _unplaced_order(self) -> list[int]:
+        ranked = [
+            index
+            for index in self.round_ids
+            if index in self.unplaced and int(index) in self.round_ranks
+        ]
+        ranked.sort(key=lambda index: (-float(self.round_ranks[int(index)]["score"]), int(index)))
+        seen = set(ranked)
+        rest = [index for index in self.round_ids if index in self.unplaced and index not in seen]
+        seen.update(rest)
+        extra = sorted(index for index in self.unplaced if index not in seen)
+        return ranked + rest + extra
 
     def _matrix_rows(self, matrix: np.ndarray, indices: list[int], width: int) -> np.ndarray:
         if not indices:
@@ -469,7 +704,7 @@ class LabSession:
             train_labels, names, epochs, task_id, on_progress=on_progress
         )
         summary = self._classification_summary(
-            names, fracs, split, labels, model, eval_device
+            names, fracs, split, labels, model, eval_device, classes
         )
         self.task_summary = summary
         self._remember_task(task_id, "classification", classes, [], None, result, summary)
@@ -543,6 +778,91 @@ class LabSession:
         self.task_summary = found.get("task_summary")
         self.save()
 
+    def rename_task(self, task_id: str, name: str) -> None:
+        found = self._task_or_raise(task_id)
+        cleaned = str(name).strip()
+        if not cleaned or "|" in cleaned:
+            raise ValueError("task name must be non-empty and cannot contain |")
+        found["name"] = cleaned
+        board = found.get("score_board")
+        if isinstance(board, dict):
+            board["name"] = cleaned
+        if self.active_task_id == task_id and isinstance(self.score_board, dict):
+            self.score_board["name"] = cleaned
+        self.save()
+
+    def delete_task(self, task_id: str) -> None:
+        self._task_or_raise(task_id)
+        self.tasks = [task for task in self.tasks if task["id"] != task_id]
+        if self.projection and self.projection.get("task_id") == task_id:
+            self.projection = None
+        if self.active_task_id == task_id:
+            if self.tasks:
+                self.show_task(self.tasks[-1]["id"])
+                return
+            self.active_task_id = None
+            self.score_board = None
+            self.task_summary = None
+        self.save()
+
+    def project_task(self, count: int) -> dict:
+        """Score the full candidate pool and keep a binned sample for the left panel."""
+        if not self.active_task_id:
+            raise ValueError("train a task before running prediction")
+        found = self._task_or_raise(self.active_task_id)
+        take = max(1, int(count))
+        indices = list(self.pool_indices)
+        if found["kind"] == "classification":
+            model = self._load_classifier(found).cpu()
+            names = [str(item.get("name") or "") for item in found.get("classes") or []]
+            mapped = str((found.get("summary") or {}).get("features") or "") == "mapped"
+            scored = self._inference_scores(
+                model,
+                indices,
+                "cpu",
+                names,
+                found.get("classes") or [],
+                mapped=mapped,
+            )
+            labels = [str(item.get("label") or "") for item in scored]
+            scores = [float(item["score"]) for item in scored]
+        elif found["kind"] == "ranking":
+            ranker = self._load_ranker(found)
+            mapped = str((found.get("summary") or {}).get("features") or "") == "mapped"
+            matrix = self._rows(indices, mapped=mapped) if indices else np.zeros((0, 1))
+            values = ranker.score(matrix) if indices else []
+            scored = [
+                {"index": int(index), "score": float(score), "label": None, "color": None}
+                for index, score in zip(indices, values)
+            ]
+            labels = None
+            scores = [float(item["score"]) for item in scored]
+        else:
+            raise ValueError("unknown task kind")
+        bins = equal_width_bins(indices, scores, labels=labels, per_bin=max(len(indices), 1))
+        by_index = {int(item["index"]): item for item in scored}
+        images = []
+        for item in _spread_bin_sample(bins, take):
+            full = by_index.get(int(item["index"]), item)
+            images.append(
+                {
+                    "index": int(full["index"]),
+                    "score": float(full["score"]),
+                    "label": full.get("label"),
+                    "color": full.get("color"),
+                }
+            )
+        images.sort(key=lambda item: (-float(item["score"]), int(item["index"])))
+        self.projection = {"task_id": found["id"], "kind": found["kind"], "images": images}
+        self.save()
+        return self.projection
+
+    def _task_or_raise(self, task_id: str) -> dict:
+        found = next((task for task in self.tasks if task["id"] == task_id), None)
+        if found is None:
+            raise KeyError(f"unknown task: {task_id}")
+        return found
+
     def snapshot(self) -> dict:
         children = self._board_categories(self.view_parent)
         strengths = []
@@ -570,8 +890,16 @@ class LabSession:
             waiting = sorted(self.root_waiting)
         predicted = {int(item["index"]): item for item in self.pool_predictions}
         images = []
-        for index in sorted(self.unplaced):
-            images.append(_image_row(index, "unplaced", predicted, self.graph))
+        for index in self._unplaced_order():
+            images.append(
+                _image_row(
+                    index,
+                    "unplaced",
+                    predicted,
+                    self.graph,
+                    rank=self.round_ranks.get(int(index)),
+                )
+            )
         images.extend(
             _image_row(index, "waiting", predicted, self.graph)
             for index in waiting
@@ -579,12 +907,14 @@ class LabSession:
         )
         return {
             "id": self.session_id,
+            "name": self.name,
             "feature_path": self.feature_path,
             "img_dir": self.img_dir,
             "pool_size": len(self.pool_indices),
             "out_dim": self.out_dim,
             "in_dim": self.in_dim,
             "round_size": self.round_size,
+            "scope_factor": int(self.scope_factor),
             "round_number": self.round_number,
             "view_parent": self.view_parent,
             "breadcrumb": crumbs,
@@ -623,6 +953,12 @@ class LabSession:
             "head_sizes": classifier_options(self._head_input_dim(), self._option_class_count()),
             "classifier_cap": CLASSIFIER_CAP,
             "layout_token": int(self._layout_token),
+            "label_colors": [
+                {"index": int(index), "color": category_color(owner)}
+                for index, owner in self.graph.assignments.items()
+                if index in self.index_to_row and not self.graph.is_recycled_sample(index)
+            ],
+            "projection": self.projection,
             "distances": self.distance_history,
             "recommend_set": list(self.recommend_set),
             "frozen": self.frozen,
@@ -648,16 +984,19 @@ class LabSession:
         np.save(self.directory / "pool_features.npy", self.features)
         state = {
             "session_id": self.session_id,
+            "name": self.name,
             "feature_path": self.feature_path,
             "pool_indices": self.pool_indices,
             "out_dim": self.out_dim,
             "round_size": self.round_size,
+            "scope_factor": int(self.scope_factor),
             "seed": self.seed,
             "img_dir": self.img_dir,
             "device": self.device,
             "epochs": self.epochs,
             "view_parent": self.view_parent,
             "round_ids": self.round_ids,
+            "round_ranks": {str(index): value for index, value in self.round_ranks.items()},
             "unplaced": sorted(self.unplaced),
             "round_number": self.round_number,
             "mapper_trained": self.mapper_trained,
@@ -676,6 +1015,7 @@ class LabSession:
             "frozen": self.frozen,
             "edge_mode": self.edge_mode,
             "shot_size": self.shot_size,
+            "projection": self.projection,
         }
         (self.directory / "session.json").write_text(json.dumps(_json_ready(state), indent=2))
         with (self.directory / "rng.pkl").open("wb") as handle:
@@ -717,8 +1057,19 @@ class LabSession:
         bundle = load_bundle(directory)
         session.graph = bundle.graph
         session.mapper = bundle.mapper
+        session.name = str(state.get("name") or "")
+        session.scope_factor = _positive_factor(state.get("scope_factor") or 10)
         session.view_parent = state.get("view_parent")
         session.round_ids = [int(value) for value in state.get("round_ids") or []]
+        session.round_ranks = {
+            int(index): {
+                "label": str(item.get("label") or ""),
+                "score": float(item.get("score") or 0),
+                "color": item.get("color"),
+            }
+            for index, item in (state.get("round_ranks") or {}).items()
+            if isinstance(item, dict)
+        }
         session.unplaced = {int(value) for value in state.get("unplaced") or []}
         session.round_number = int(state.get("round_number") or 0)
         session.mapper_trained = bool(state.get("mapper_trained"))
@@ -747,6 +1098,7 @@ class LabSession:
         session.frozen = bool(state.get("frozen"))
         session.edge_mode = str(state.get("edge_mode") or "distance")
         session.shot_size = str(state.get("shot_size") or "small")
+        session.projection = state.get("projection")
         rng_path = directory / "rng.pkl"
         if rng_path.is_file():
             with rng_path.open("rb") as handle:
@@ -800,28 +1152,43 @@ class LabSession:
             self.head_hidden = (64, 32)
 
     def _bump_layout(self) -> None:
+        """The mapper changed, so the mapped UMAP is fit again. Raw coordinates stay."""
         self._layout_token += 1
-        self._umap_cache = None
+        self._mapped_umap = None
+        self._mapped_pool_key = None
+
+    def _reset_umap(self) -> None:
+        """The candidate pool changed, so both UMAP fits are stale."""
+        self._layout_token += 1
+        self._raw_umap = None
+        self._raw_pool_key = None
+        self._mapped_umap = None
+        self._mapped_pool_key = None
 
     def umap_layout(self) -> dict:
         """Raw and mapped coordinates for every sample in the candidate pool.
 
-        Coordinates are cached until the features or the map change. Colors are
-        filled on each call so a new label does not refit UMAP.
+        Raw coordinates are fit the first time UMAP is opened for this pool.
+        Later calls only recolor labeled points. Mapped coordinates are fit
+        again when the mapper changes.
         """
-        if self._umap_cache is None or self._umap_cache.get("token") != self._layout_token:
-            from hitl_features.umap_layout import embed_points
+        from hitl_features.umap_layout import embed_points
 
-            self._umap_cache = {
-                "token": self._layout_token,
-                "raw": embed_points(self.features, self.seed),
-                "mapped": embed_points(self._pool_matrix(mapped=True), self.seed + 1),
-            }
+        pool_key = tuple(int(index) for index in self.pool_indices)
+        if self._raw_umap is None or self._raw_pool_key != pool_key:
+            self._raw_umap = embed_points(self.features, self.seed)
+            self._raw_pool_key = pool_key
+        if self._mapped_umap is None or self._mapped_pool_key != pool_key:
+            self._mapped_umap = embed_points(self._pool_matrix(mapped=True), self.seed + 1)
+            self._mapped_pool_key = pool_key
         colors: dict[int, str] = {}
+        names: dict[int, str] = {}
         for index, owner in self.graph.assignments.items():
             if index not in self.index_to_row or self.graph.is_recycled_sample(index):
                 continue
             colors[int(index)] = category_color(owner)
+            if owner in self.graph.categories:
+                names[int(index)] = self.graph.categories[owner].name
 
         def pack(xy: np.ndarray) -> list[dict]:
             rows = []
@@ -832,15 +1199,15 @@ class LabSession:
                         "x": float(xy[row, 0]),
                         "y": float(xy[row, 1]),
                         "color": colors.get(int(index)),
+                        "category": names.get(int(index)),
                     }
                 )
             return rows
 
-        cached = self._umap_cache
         return {
             "token": int(self._layout_token),
-            "raw": pack(cached["raw"]),
-            "mapped": pack(cached["mapped"]),
+            "raw": pack(self._raw_umap),
+            "mapped": pack(self._mapped_umap),
         }
 
     def _train_heads(
@@ -883,7 +1250,7 @@ class LabSession:
         return result, model, eval_device
 
     def _classification_summary(
-        self, names, fracs, split, labels, model, device
+        self, names, fracs, split, labels, model, device, classes=None
     ) -> dict:
         """Short metrics for each split, plus scores for the non-training members."""
         multiclass = len({name for name, parts in split.items() if parts["train"]}) > 2
@@ -906,7 +1273,7 @@ class LabSession:
             "fractions": {"train": fracs[0], "val": fracs[1], "test": fracs[2]},
             "train_ids": train_ids,
             "splits": splits,
-            "inference": self._inference_scores(model, chosen, device),
+            "inference": self._inference_scores(model, chosen, device, names, classes or []),
         }
 
     def _measure_split(self, model, named, names, multiclass, device) -> dict:
@@ -937,16 +1304,75 @@ class LabSession:
         row[prefix + "_roc_auc"] = None if auc is None else float(auc)
         return row
 
-    def _inference_scores(self, model, indices: list[int], device: str) -> list[dict]:
+    def _inference_scores(
+        self, model, indices: list[int], device: str, names=None, classes=None, mapped=None
+    ) -> list[dict]:
         if not indices:
             return []
-        features = self._rows(indices, mapped=self._active_feature_source() == "mapped")
+        if mapped is None:
+            mapped = self._active_feature_source() == "mapped"
+        features = self._rows(indices, mapped=bool(mapped))
         proba = predict_proba(model, features, device=device)
         picked = np.argmax(proba, axis=1)
+        class_names = [str(name) for name in names] if names is not None else []
         rows = []
         for row, index in enumerate(indices):
-            rows.append({"index": int(index), "score": float(proba[row, int(picked[row])])})
+            class_index = int(picked[row])
+            label = None
+            color = None
+            if class_names:
+                label = class_names[class_index] if class_index < len(class_names) else str(class_index)
+                color = self._class_color(label, classes or [])
+            rows.append(
+                {
+                    "index": int(index),
+                    "score": float(proba[row, class_index]),
+                    "label": label,
+                    "color": color,
+                }
+            )
+        rows.sort(key=lambda item: (-float(item["score"]), int(item["index"])))
         return rows
+
+    def _class_color(self, class_name: str, classes: list) -> str | None:
+        """Border color for a task class: its first category, or a category of the same name."""
+        for item in classes or []:
+            if str(item.get("name") or "") != str(class_name):
+                continue
+            ids = [str(value) for value in item.get("category_ids") or [] if str(value)]
+            if ids:
+                return category_color(ids[0])
+        for cat in self.graph.children_depth_first():
+            if cat.name == class_name and not self.graph.is_recycled_category(cat.id):
+                return category_color(cat.id)
+        return None
+
+    def _load_task_state(self, task: dict) -> dict:
+        features = str((task.get("summary") or {}).get("features") or "raw")
+        path = self.directory / "tasks" / str(task["id"]) / ("mapped.pt" if features == "mapped" else "raw.pt")
+        return torch.load(path, map_location="cpu")
+
+    def _load_classifier(self, task: dict) -> MlpClassifier:
+        state = self._load_task_state(task)
+        first = state["net.0.weight"]
+        second = state["net.2.weight"]
+        last = state["net.4.weight"]
+        model = MlpClassifier(
+            int(first.shape[1]),
+            int(last.shape[0]),
+            hidden=(int(first.shape[0]), int(second.shape[0])),
+        )
+        model.load_state_dict(state)
+        model.eval()
+        return model
+
+    def _load_ranker(self, task: dict) -> Ranker:
+        state = self._load_task_state(task)
+        first = state["net.0.weight"]
+        second = state["net.2.weight"]
+        net = ScoreNet(int(first.shape[1]), hidden=(int(first.shape[0]), int(second.shape[0])))
+        net.load_state_dict(state)
+        return Ranker(net)
 
     def _board_categories(self, parent_id: str | None):
         return [
@@ -1086,7 +1512,7 @@ class LabSession:
         self.pool_indices.extend(missing)
         self.index_to_row = {index: row for row, index in enumerate(self.pool_indices)}
         self._mapped_cache = None
-        self._bump_layout()
+        self._reset_umap()
 
     def _allocate_task_id(self) -> str:
         self._task_seq += 1
@@ -1235,6 +1661,14 @@ class SessionStore:
                 session = LabSession.load(path)
                 self._sessions[session.session_id] = session
 
+    def list_projects(self) -> list[dict]:
+        rows = [
+            {"id": session.session_id, "name": session.name or session.session_id}
+            for session in self._sessions.values()
+        ]
+        rows.sort(key=lambda item: (item["name"].lower(), item["id"]))
+        return rows
+
     def create(
         self,
         *,
@@ -1247,7 +1681,9 @@ class SessionStore:
         device: str = "cpu",
         epochs: int = 30,
         pool_indices: list[int] | None = None,
+        name: str = "",
     ) -> LabSession:
+        cleaned = _project_name(name, self._sessions.values())
         if int(out_dim) < 1:
             raise ValueError("out_dim must be positive")
         catalog = catalog_indices(feature_path)
@@ -1289,6 +1725,7 @@ class SessionStore:
             device,
             epochs,
         )
+        session.name = cleaned
         session.save()
         self._sessions[session_id] = session
         return session
@@ -1298,6 +1735,41 @@ class SessionStore:
             return self._sessions[session_id]
         except KeyError as exc:
             raise KeyError(f"unknown session: {session_id}") from exc
+
+
+def _positive_factor(value) -> int:
+    """A widen factor is an integer of at least 1."""
+    if isinstance(value, bool):
+        raise ValueError("scope factor must be a positive integer")
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError("scope factor must be a positive integer")
+        factor = int(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text.isdigit():
+            raise ValueError("scope factor must be a positive integer")
+        factor = int(text)
+    elif isinstance(value, int):
+        factor = value
+    else:
+        raise ValueError("scope factor must be a positive integer")
+    if factor < 1:
+        raise ValueError("scope factor must be a positive integer")
+    return factor
+
+
+def _project_name(name: str, sessions) -> str:
+    """A project name is required, unique, and safe to show beside a path."""
+    cleaned = str(name or "").strip()
+    if not cleaned:
+        raise ValueError("project name is required")
+    if "|" in cleaned or "/" in cleaned or "\\" in cleaned:
+        raise ValueError("project name cannot contain | or a path separator")
+    taken = {str(session.name) for session in sessions if str(getattr(session, "name", ""))}
+    if cleaned in taken:
+        raise ValueError("a project with this name already exists")
+    return cleaned
 
 
 def _coerce_fractions(fractions) -> tuple[float, float, float]:
@@ -1328,16 +1800,45 @@ def _child_under(graph: CategoryGraph, parent_id: str, category_id: str) -> str 
     return path[position + 1]
 
 
-def _image_row(index: int, role: str, predicted: dict, graph: CategoryGraph) -> dict:
+def _spread_bin_sample(bins: list[dict], count: int) -> list[dict]:
+    """Take images round-robin across score bins until ``count`` is filled."""
+    columns = [list(item.get("images") or []) for item in bins]
+    chosen: list[dict] = []
+    while len(chosen) < int(count):
+        progressed = False
+        for column in columns:
+            if column and len(chosen) < int(count):
+                chosen.append(column.pop(0))
+                progressed = True
+        if not progressed:
+            break
+    return chosen
+
+
+def _image_row(index: int, role: str, predicted: dict, graph: CategoryGraph, rank: dict | None = None) -> dict:
     item = predicted.get(int(index))
     name = None
     level = None
+    prediction_color = None
     if item and item.get("category_id") in graph.categories:
         name = graph.categories[item["category_id"]].name
         level = item.get("level")
-    return {
+        prediction_color = category_color(str(item["category_id"]))
+    owner = graph.category_of(index)
+    parent_id = None
+    if owner and owner in graph.categories:
+        parent_id = graph.categories[owner].parent_id
+    row = {
         "index": int(index),
         "role": role,
         "prediction": name,
         "prediction_level": level,
+        "prediction_color": prediction_color,
+        "category_id": owner,
+        "parent_id": parent_id,
     }
+    if rank and rank.get("label"):
+        row["label"] = rank["label"]
+        row["score"] = float(rank["score"])
+        row["color"] = rank.get("color")
+    return row

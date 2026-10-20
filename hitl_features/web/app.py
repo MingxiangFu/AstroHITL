@@ -44,10 +44,15 @@ def create_app(sessions_root: Path | str) -> Flask:
                 device=str(device),
                 epochs=int(body.get("epochs", 30)),
                 pool_indices=body.get("pool_indices"),
+                name=str(body.get("name") or ""),
             )
         except (KeyError, TypeError, ValueError) as exc:
             return jsonify(error=str(exc)), 400
         return jsonify(snapshot=session.snapshot())
+
+    @app.get("/api/sessions")
+    def list_sessions():
+        return jsonify(projects=app.config["STORE"].list_projects())
 
     @app.get("/api/sessions/<session_id>")
     def get_session(session_id: str):
@@ -63,6 +68,8 @@ def create_app(sessions_root: Path | str) -> Flask:
             chosen = session.recommend_round(
                 str(body.get("mechanism") or "random"),
                 body.get("category_ids"),
+                within_labeled=bool(body.get("within_labeled")),
+                scope_factor=body.get("scope_factor"),
             )
             return {"snapshot": session.snapshot(), "chosen": chosen}
 
@@ -318,6 +325,39 @@ def create_app(sessions_root: Path | str) -> Flask:
         except KeyError as exc:
             return jsonify(error=str(exc)), 404
         return jsonify(snapshot=session.snapshot())
+
+    @app.post("/api/sessions/<session_id>/tasks/rename")
+    def rename_task(session_id: str):
+        session = _session_or_404(app, session_id)
+        body = request.get_json(force=True) or {}
+        try:
+            session.rename_task(str(body["task_id"]), str(body.get("name") or ""))
+        except KeyError as exc:
+            return jsonify(error=str(exc)), 404
+        except (TypeError, ValueError) as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(snapshot=session.snapshot())
+
+    @app.post("/api/sessions/<session_id>/tasks/delete")
+    def delete_task(session_id: str):
+        session = _session_or_404(app, session_id)
+        body = request.get_json(force=True) or {}
+        try:
+            session.delete_task(str(body["task_id"]))
+        except KeyError as exc:
+            return jsonify(error=str(exc)), 404
+        return jsonify(snapshot=session.snapshot())
+
+    @app.post("/api/sessions/<session_id>/tasks/project")
+    def project_task(session_id: str):
+        session = _session_or_404(app, session_id)
+        body = request.get_json(force=True) or {}
+
+        def work(on_progress):
+            projection = session.project_task(int(body.get("count") or 1))
+            return {"snapshot": session.snapshot(), "projection": projection}
+
+        return _respond(work, body, runtime_as_client=True)
 
     @app.get("/media/<session_id>/<int:index>")
     def media(session_id: str, index: int):
